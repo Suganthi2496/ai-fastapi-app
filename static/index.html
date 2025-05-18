@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-top: 20px; }
+        .chat-container { max-height: 400px; overflow-y: auto; }
+        .message { margin-bottom: 10px; padding: 10px; border-radius: 5px; }
+        .user-message { background-color: #e9ecef; text-align: right; }
+        .ai-message { background-color: #f8f9fa; }
+        .fallback-message { background-color: #fff3cd; color: #856404; }
+        .error-message { background-color: #f8d7da; color: #721c24; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .loading { 
+            opacity: 0.7; 
+            pointer-events: none;
+        }
+        .spinner-border {
+            width: 1rem;
+            height: 1rem;
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">AI Assistant</h1>
+        
+        <div class="row">
+            <div class="col-md-8 offset-md-2">
+                <div id="apiError" class="error-message d-none">
+                    <strong>Error:</strong> <span id="errorMessage"></span>
+                    <div id="errorSuggestion" class="mt-2"></div>
+                </div>
+
+                <ul class="nav nav-tabs" id="myTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab">Chat</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="content-tab" data-bs-toggle="tab" data-bs-target="#content" type="button" role="tab">Generate Content</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="document-tab" data-bs-toggle="tab" data-bs-target="#document" type="button" role="tab">Document QA</button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Chat Tab -->
+                    <div class="tab-pane fade show active" id="chat" role="tabpanel">
+                        <div class="chat-container mb-3" id="chatMessages"></div>
+                        <form id="chatForm">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="questionInput" placeholder="Ask a question...">
+                                <button class="btn btn-primary" type="submit" id="sendButton">
+                                    <span class="d-none spinner-border spinner-border-sm" id="chatSpinner"></span>
+                                    Send
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- Content Generation Tab -->
+                    <div class="tab-pane fade" id="content" role="tabpanel">
+                        <form id="contentForm">
+                            <div class="mb-3">
+                                <label for="promptInput" class="form-label">Content Prompt</label>
+                                <textarea class="form-control" id="promptInput" rows="3" placeholder="Describe the content you want to generate..."></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="maxTokens" class="form-label">Max Length</label>
+                                <input type="range" class="form-range" id="maxTokens" min="100" max="1000" step="50" value="500">
+                                <div class="text-end"><span id="tokenValue">500</span> tokens</div>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="generateButton">
+                                <span class="d-none spinner-border spinner-border-sm" id="contentSpinner"></span>
+                                Generate
+                            </button>
+                        </form>
+                        <div class="mt-3">
+                            <h5>Generated Content:</h5>
+                            <div class="border p-3 bg-light" id="generatedContent"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Document QA Tab -->
+                    <div class="tab-pane fade" id="document" role="tabpanel">
+                        <form id="documentForm">
+                            <div class="mb-3">
+                                <label for="documentFile" class="form-label">Upload PDF Document</label>
+                                <input class="form-control" type="file" id="documentFile" accept=".pdf">
+                            </div>
+                            <div class="mb-3">
+                                <label for="documentQuestion" class="form-label">Question about the document</label>
+                                <input type="text" class="form-control" id="documentQuestion" placeholder="Ask something about the document...">
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="documentButton">
+                                <span class="d-none spinner-border spinner-border-sm" id="documentSpinner"></span>
+                                Ask
+                            </button>
+                        </form>
+                        <div class="mt-3">
+                            <h5>Answer:</h5>
+                            <div class="border p-3 bg-light" id="documentAnswer"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const API_URL = '/api/v1';
+            
+            // Error handling elements
+            const apiError = document.getElementById('apiError');
+            const errorMessage = document.getElementById('errorMessage');
+            const errorSuggestion = document.getElementById('errorSuggestion');
+            
+            // Utility functions
+            function showError(message, suggestion = '') {
+                errorMessage.textContent = message;
+                errorSuggestion.textContent = suggestion;
+                apiError.classList.remove('d-none');
+                setTimeout(() => {
+                    apiError.classList.add('d-none');
+                }, 10000); // Hide error after 10 seconds
+            }
+            
+            function clearError() {
+                apiError.classList.add('d-none');
+            }
+            
+            function setLoading(element, isLoading) {
+                const spinner = element.querySelector('.spinner-border');
+                if (isLoading) {
+                    element.disabled = true;
+                    spinner.classList.remove('d-none');
+                } else {
+                    element.disabled = false;
+                    spinner.classList.add('d-none');
+                }
+            }
+            
+            async function handleApiResponse(response) {
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (response.status === 429) {
+                        showError(
+                            'API quota exceeded. The AI service is currently unavailable.',
+                            errorData.detail?.suggestion || 'Please try again later or contact support.'
+                        );
+                        return null;
+                    } else if (response.status === 401) {
+                        showError(
+                            'Authentication error with the AI service.',
+                            errorData.detail?.suggestion || 'Please contact the administrator.'
+                        );
+                        return null;
+                    } else {
+                        showError(
+                            errorData.detail || 'An unknown error occurred',
+                            errorData.detail?.suggestion || ''
+                        );
+                        return null;
+                    }
+                }
+                return await response.json();
+            }
+            
+            // Chat functionality
+            const chatForm = document.getElementById('chatForm');
+            const questionInput = document.getElementById('questionInput');
+            const chatMessages = document.getElementById('chatMessages');
+            const sendButton = document.getElementById('sendButton');
+            
+            chatForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const question = questionInput.value.trim();
+                if (!question) return;
+                
+                clearError();
+                setLoading(sendButton, true);
+                
+                // Add user message
+                addMessage('user', question);
+                questionInput.value = '';
+                
+                try {
+                    const response = await fetch(`${API_URL}/ask`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ question })
+                    });
+                    
+                    const data = await handleApiResponse(response);
+                    if (data) {
+                        addMessage('ai', data.answer, data.fallback_used);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showError('Failed to connect to the server', 'Please check your internet connection and try again.');
+                } finally {
+                    setLoading(sendButton, false);
+                }
+            });
+            
+            function addMessage(type, text, isFallback = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}-message`;
+                if (isFallback && type === 'ai') {
+                    messageDiv.classList.add('fallback-message');
+                }
+                messageDiv.textContent = text;
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            // Content generation functionality
+            const contentForm = document.getElementById('contentForm');
+            const promptInput = document.getElementById('promptInput');
+            const maxTokens = document.getElementById('maxTokens');
+            const tokenValue = document.getElementById('tokenValue');
+            const generatedContent = document.getElementById('generatedContent');
+            const generateButton = document.getElementById('generateButton');
+            
+            maxTokens.addEventListener('input', function() {
+                tokenValue.textContent = this.value;
+            });
+            
+            contentForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const prompt = promptInput.value.trim();
+                if (!prompt) return;
+                
+                clearError();
+                setLoading(generateButton, true);
+                generatedContent.textContent = 'Generating...';
+                
+                try {
+                    const response = await fetch(`${API_URL}/generate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ 
+                            prompt, 
+                            max_tokens: parseInt(maxTokens.value) 
+                        })
+                    });
+                    
+                    const data = await handleApiResponse(response);
+                    if (data) {
+                        generatedContent.textContent = data.content;
+                        if (data.fallback_used) {
+                            generatedContent.classList.add('fallback-message');
+                        } else {
+                            generatedContent.classList.remove('fallback-message');
+                        }
+                    } else {
+                        generatedContent.textContent = '';
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showError('Failed to connect to the server', 'Please check your internet connection and try again.');
+                    generatedContent.textContent = '';
+                } finally {
+                    setLoading(generateButton, false);
+                }
+            });
+            
+            // Document QA functionality
+            const documentForm = document.getElementById('documentForm');
+            const documentFile = document.getElementById('documentFile');
+            const documentQuestion = document.getElementById('documentQuestion');
+            const documentAnswer = document.getElementById('documentAnswer');
+            const documentButton = document.getElementById('documentButton');
+            
+            documentForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const file = documentFile.files[0];
+                const question = documentQuestion.value.trim();
+                
+                if (!file || !question) {
+                    alert('Please select a file and enter a question');
+                    return;
+                }
+                
+                clearError();
+                setLoading(documentButton, true);
+                documentAnswer.textContent = 'Processing...';
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('question', question);
+                
+                try {
+                    const response = await fetch(`${API_URL}/document-qa`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await handleApiResponse(response);
+                    if (data) {
+                        documentAnswer.textContent = data.answer;
+                        if (data.fallback_used) {
+                            documentAnswer.classList.add('fallback-message');
+                        } else {
+                            documentAnswer.classList.remove('fallback-message');
+                        }
+                    } else {
+                        documentAnswer.textContent = '';
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showError('Failed to connect to the server', 'Please check your internet connection and try again.');
+                    documentAnswer.textContent = '';
+                } finally {
+                    setLoading(documentButton, false);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
