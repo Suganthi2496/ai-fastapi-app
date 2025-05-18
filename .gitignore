@@ -25,7 +25,11 @@ MANIFEST
 venv/
 env/
 ENV/
+
+# Environment variables - exclude .env but include .env.example
 .env
+.env.*
+!.env.example
 
 # IDE
 .idea/
@@ -49,8 +53,6 @@ htmlcov/
 logs/
 temp/
 uploads/
-.env
-.env.*
 
 # PyCharm
 *.iml
